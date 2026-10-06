@@ -1,0 +1,1871 @@
+---
+title: "R Notebook"
+output:
+  word_document: default
+  html_notebook: default
+---
+Reduction Effects upon Dart and Arrow Classification: A New Model Using an
+Expanded Dataset
+Michael J. Shott, Marcelo Cardillo and Judith Charlin
+DOI:https://doi.org/10.5281/zenodo.22968953
+
+
+Supplementary data
+
+ GENERAL NOTE:
+ This R Markdown file contains the complete LDA analysis performed on the
+ 344-case dataset (LDA_master.txt) to evaluate morphometric classification
+ of projectile points as darts or arrows.
+
+ Three Linear Discriminant Analysis (LDA) models are evaluated using different
+ combinations of morphometric variables:
+   1. Length + Width (LW), following Buchanan et al.
+   2. Width + Thickness (WT), following Shott (1997).
+   3. Length + Width + Thickness (LWT), to evaluate the contribution of
+      Thickness when Length and Width are included.
+
+ The dataset is divided into training and test subsets. Predictor variables
+ are standardized using parameters estimated from the training data and the
+ same transformation is applied to the test data. Each model is evaluated on
+ the independent test set using posterior probabilities and classification
+ thresholds of 0.15 and 0.50.
+
+ Model performance is further evaluated using repeated 10-fold cross-validation
+ (10 repeats). Accuracy, Kappa, sensitivity, specificity, and balanced accuracy
+ are summarized across resampling iterations, including empirical 95% intervals.
+
+ The analysis also examines how classification performance changes across a
+ continuous range of posterior-probability thresholds. Additional sections
+ identify test specimens whose classification changes across thresholds,
+ visualize morphologically ambiguous cases, and explore the relationship
+ between misclassification and the Iriarte index (Length / Thickness).
+
+ The script is intended to provide a complete and reproducible record of the
+ model fitting, classification, cross-validation, performance evaluation,
+ threshold analysis, and examination of misclassified test specimens.
+
+
+
+
+```{r}
+#001
+# Load required libraries
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(MASS)
+library(tidyr)
+library(purrr)
+```
+
+
+```{r}
+#002
+# Load the dataset
+master_LDA<-read.table("LDA_master.txt", header=T, row.names=1)
+
+```
+
+```{r}
+#003
+# Inspect the dataset
+head(master_LDA)
+
+summary(master_LDA)
+
+table(master_LDA$type, useNA = "ifany")
+
+```
+
+
+```{r}
+#004
+# Create training and test sets
+set.seed(123)
+
+
+train_index <- createDataPartition(master_LDA$type,
+                                   p = 0.80,
+                                   list = FALSE)
+
+train <- master_LDA[train_index, ]
+test  <- master_LDA[-train_index, ]
+
+```
+
+
+```{r}
+#005
+# Prepare the length and width model
+
+
+set.seed(2026)
+
+pred_vars <- c("length", "width")
+
+# standardization only with train
+pp <- preProcess(train[, pred_vars],
+                 method = c("center", "scale"))
+
+train_std <- train
+train_std[, pred_vars] <- predict(pp, train[, pred_vars])
+
+# pred to de test set
+test_std <- test
+test_std[, pred_vars] <- predict(pp, test[, pred_vars])
+```
+
+
+
+```{r}
+#006
+# Fit the first LDA model
+lda_mod1 <- lda(type ~ length + width,
+                data = train_std)
+
+lda_mod1
+```
+
+
+```{r}
+#007
+# Predict with the first model
+pred1 <- predict(lda_mod1, newdata = test_std)
+
+head(pred1$posterior)
+
+```
+
+
+```{r}
+#008
+# Extract first-model probabilities
+test_std$prob_dart <- pred1$posterior[, "dart"]
+
+```
+
+
+
+```{r}
+#009
+# Apply 0.15 and 0.50 thresholds
+
+test_std$pred015 <- ifelse(test_std$prob_dart >= 0.15,
+                           "dart",
+                           "arrow")
+
+test_std$pred050 <- ifelse(test_std$prob_dart >= 0.50,
+                           "dart",
+                           "arrow")
+```
+
+
+```{r}
+#010
+# Evaluate first-model classifications
+
+cm015 <- confusionMatrix(
+  factor(test_std$pred015,
+         levels=c("arrow","dart")),
+  factor(test_std$type,
+         levels=c("arrow","dart")),
+  positive="dart"
+)
+
+cm050 <- confusionMatrix(
+  factor(test_std$pred050,
+         levels=c("arrow","dart")),
+  factor(test_std$type,
+         levels=c("arrow","dart")),
+  positive="dart"
+)
+```
+
+
+
+```{r}
+#011
+# Review first-model results
+print(cm015)
+
+print(cm050)
+```
+
+```{r}
+#012
+# Configure repeated cross-validation
+
+set.seed(2026)
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,          # 10 folds
+  repeats = 10,         # repetido 10 veces
+  classProbs = TRUE,
+  savePredictions = "final"
+)
+```
+
+
+
+
+
+```{r}
+#013
+# Run analysis step
+set.seed(2026)
+
+lda_cv1 <- train(
+  type ~ length + width,
+  data = train,
+  method = "lda",
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  metric = "Accuracy"
+)
+```
+
+
+```{r}
+#014
+# Review first-model cross-validation
+print(lda_cv1)
+
+print(lda_cv1$results)
+```
+```{r}
+#015
+# Generate model predictions
+#####modelo 2 type ~ width + thickness
+
+set.seed(2026)
+
+# Variables predictoras
+pred_vars2 <- c("width", "thickness")
+
+# Ajustar la estandarización SOLO con train
+pp2 <- preProcess(train[, pred_vars2],
+                 method = c("center", "scale"))
+
+# Aplicarla a train
+train_std2 <- train
+train_std2[, pred_vars2] <- predict(pp2, train[, pred_vars2])
+
+# Aplicarla a test usando los mismos parámetros
+test_std2 <- test
+test_std2[, pred_vars2] <- predict(pp2, test[, pred_vars2])
+
+```
+
+
+
+```{r}
+#016
+# Fit the second LDA model
+lda_mod2 <- lda(type ~width+thickness,
+                data = train_std2)
+
+lda_mod2
+```
+
+```{r}
+#017
+# Generate model predictions
+pred2 <- predict(lda_mod2, newdata = test_std2)
+
+head(pred2$posterior)
+```
+
+
+```{r}
+#018
+# Extract second-model probabilities
+
+test_std2$prob_dart <- pred2$posterior[, "dart"]
+```
+
+
+
+```{r}
+#019
+# Apply classification thresholds
+
+test_std2$pred015_2 <- ifelse(test_std2$prob_dart >= 0.15,
+                           "dart",
+                           "arrow")
+
+test_std2$pred050_2 <- ifelse(test_std2$prob_dart >= 0.50,
+                           "dart",
+                           "arrow")
+```
+
+
+
+```{r}
+#020
+# Evaluate second-model classifications
+
+cm015_2 <- confusionMatrix(
+  factor(test_std2$pred015_2,
+         levels=c("arrow","dart")),
+  factor(test_std2$type,
+         levels=c("arrow","dart")),
+  positive="dart"
+)
+
+cm050_2 <- confusionMatrix(
+  factor(test_std2$pred050_2,
+         levels=c("arrow","dart")),
+  factor(test_std2$type,
+         levels=c("arrow","dart")),
+  positive="dart"
+)
+```
+
+
+```{r}
+#021
+# Review second-model results
+
+print(cm015_2)
+
+print(cm050_2)
+
+```
+
+```{r}
+#022
+# 10 fold CV, modelo 2 ##esto es igual
+
+set.seed(2026)
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,          # 10 folds
+  repeats = 10,         # repetido 10 veces
+  classProbs = TRUE,
+  savePredictions = "final"
+)
+```
+
+
+
+
+```{r}
+#023
+# Run analysis step
+set.seed(2026)
+
+lda_cv2 <- train(
+  type ~ width+thickness,
+  data = train,
+  method = "lda",
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  metric = "Accuracy"
+)
+```
+
+
+
+```{r}
+#024
+# Review second-model cross-validation
+print(lda_cv2)
+
+print(lda_cv2$results)
+```
+
+
+```{r}
+#025
+# Generate model predictions
+#####modelo 3 type ~ length+width + thickness
+
+set.seed(2026)
+
+# Variables predictoras
+pred_vars3 <- c( "length", "width", "thickness")
+
+# Ajustar la estandarización SOLO con train
+pp3 <- preProcess(train[, pred_vars3],
+                 method = c("center", "scale"))
+
+# Aplicarla a train
+train_std3 <- train
+train_std3[, pred_vars3] <- predict(pp3, train[, pred_vars3])
+
+# Aplicarla a test usando los mismos parámetros
+test_std3 <- test
+test_std3[, pred_vars3] <- predict(pp3, test[, pred_vars3])
+
+
+```
+
+
+
+```{r}
+#026
+# Fit the third LDA model
+
+lda_mod3 <- lda(type ~ length + width+thickness,
+                data = train_std3)
+
+lda_mod3
+```
+```{r}
+#027
+# Generate model predictions
+pred3 <- predict(lda_mod3, newdata = test_std3)
+
+head(pred3$posterior)
+```
+
+
+```{r}
+#028
+# Extract third-model probabilities
+
+test_std3$prob_dart <- pred3$posterior[, "dart"]
+```
+
+
+
+```{r}
+#029
+# Apply classification thresholds
+
+test_std3$pred015_3 <- ifelse(test_std3$prob_dart >= 0.15,
+                           "dart",
+                           "arrow")
+
+test_std3$pred050_3 <- ifelse(test_std3$prob_dart >= 0.50,
+                           "dart",
+                           "arrow")
+```
+
+
+
+```{r}
+#030
+# Evaluate third-model classifications
+
+cm015_3 <- confusionMatrix(
+  factor(test_std3$pred015_3,
+         levels=c("arrow","dart")),
+  factor(test_std3$type,
+         levels=c("arrow","dart")),
+  positive="dart"
+)
+
+cm050_3 <- confusionMatrix(
+  factor(test_std3$pred050_3,
+         levels=c("arrow","dart")),
+  factor(test_std3$type,
+         levels=c("arrow","dart")),
+  positive="dart"
+)
+```
+
+
+```{r}
+#031
+# Review third-model results
+
+print(cm015_3)
+
+print(cm050_3)
+
+```
+
+```{r}
+#032
+# 10 fold CV, modelo 3 ##esto es igual
+
+set.seed(2026)
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,          # 10 folds
+  repeats = 10,         # repetido 10 veces
+  classProbs = TRUE,
+  savePredictions = "final"
+)
+```
+
+
+
+
+```{r}
+#033
+# Run analysis step
+set.seed(2026)
+
+lda_cv3 <- train(
+  type ~ length + width+thickness,
+  data = train,
+  method = "lda",
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  metric = "Accuracy"
+)
+```
+
+
+
+```{r}
+#034
+# Review third-model cross-validation
+print(lda_cv3)
+
+print(lda_cv3$results)
+```
+
+```{r}
+#035
+# Collect the fitted models
+
+modelos <- list(
+  m1 = lda_cv1,
+  m2 = lda_cv2,
+  m3 = lda_cv3
+)
+
+```
+
+
+```{r}
+#036
+# Calculate cross-validation metrics
+
+extract_metrics <- function(modelo, nombre){
+
+   modelo$pred %>%
+    group_by(Resample) %>%
+    group_modify(~{
+
+      cm <- confusionMatrix(
+        factor(.x$pred,
+               levels = c("arrow","dart")),
+        factor(.x$obs,
+               levels = c("arrow","dart")),
+        positive = "dart"
+      )
+
+      tibble(
+        Accuracy = unname(cm$overall["Accuracy"]),
+        Kappa = unname(cm$overall["Kappa"]),
+        Sensitivity = unname(cm$byClass["Sensitivity"]),
+        Specificity = unname(cm$byClass["Specificity"]),
+        BalancedAccuracy = unname(cm$byClass["Balanced Accuracy"])
+      )
+
+    }) %>%
+
+    mutate(Model = nombre)
+}
+```
+
+
+```{r}
+#037
+# extraer metricas 3 modelos
+
+m1 <- extract_metrics(lda_cv1, "Length + Width")
+
+m2 <- extract_metrics(lda_cv2, "Width + Thickness")
+
+m3 <- extract_metrics(lda_cv3, "Length + Width + Thickness")
+```
+
+
+
+```{r}
+#038
+# Combine model metrics
+metricas <- bind_rows(m1, m2, m3)
+```
+
+
+```{r}
+#039
+# Summarize model performance
+#####comparacion modelos intervalos empiricos 95%
+
+
+##check metricas
+metricas %>%
+  group_by(Model) %>%
+  summarise(
+    n = n(),
+    Accuracy = mean(Accuracy),
+    BA = mean(BalancedAccuracy),
+    Sensitivity = mean(Sensitivity),
+    Specificity = mean(Specificity),
+    Kappa = mean(Kappa)
+  )
+```
+
+```{r}
+#040
+# Summarize model performance
+metricas_long <- metricas %>%
+  pivot_longer(
+    cols = c(
+      Accuracy,
+      BalancedAccuracy,
+      Sensitivity,
+      Specificity,
+      Kappa
+    ),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+```
+
+
+```{r}
+#041
+# Summarize model performance
+resumen_metrica <- function(x){
+
+  tibble(
+    media = mean(x),
+    sd = sd(x),
+    mediana = median(x),
+    LI95 = quantile(x, 0.025),
+    LS95 = quantile(x, 0.975)
+  )
+
+}
+
+
+resumen <- metricas %>%
+  pivot_longer(
+    cols = c(Accuracy,
+             BalancedAccuracy,
+             Sensitivity,
+             Specificity,
+             Kappa),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  group_by(Model, Metric) %>%
+  group_modify(~ resumen_metrica(.x$Value))
+
+```
+
+
+
+```{r}
+#042
+# Run analysis step
+print(resumen)
+```
+
+```{r}
+#043
+# Plot model performance
+
+ggplot(resumen,
+       aes(x = Model,
+           y = media)) +
+
+  geom_point(size = 3,
+             colour = "black") +
+
+  geom_errorbar(aes(ymin = LI95,
+                    ymax = LS95),
+                width = .15,
+                linewidth = .8) +
+
+  facet_wrap(~Metric,
+             ncol = 3,
+             scales = "free_y") +
+
+  labs(x = "",
+       y = "Mean performance (95% empirical CI)") +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    strip.background = element_rect(fill = "white",
+                                    colour = "black"),
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 15,
+                               hjust = 1)
+  )
+
+```
+```{r}
+#044
+# Summarize model performance
+metricas_long$Model <- factor(
+  metricas_long$Model,
+  levels = c(
+    "Length + Width",
+    "Width + Thickness",
+    "Length + Width + Thickness"
+  ),
+  labels = c("LW", "WT", "LWT")
+)
+```
+
+
+```{r}
+#045
+# Visualize analysis results
+ggplot(metricas_long,
+       aes(x = Model,
+           y = Value)) +
+
+  geom_jitter(width = 0.08,
+              alpha = 0.35,
+              size = 1.8,
+              colour = "grey45") +
+
+  stat_summary(fun = median,
+               geom = "point",
+               shape = 15,
+               size = 3.5,
+               colour = "black") +
+
+  facet_wrap(~Metric,
+             ncol = 3,
+             scales = "free_y") +
+
+  labs(x = "",
+       y = "Performance metric") +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    legend.position = "none",
+    strip.background = element_rect(fill = "white",
+                                    colour = "black"),
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 0,
+                               hjust = 1)
+  )
+```
+```{r}
+#046
+# Evaluate classification performance
+
+
+threshold_curve <- function(modelo,
+                            nombre,
+                            thresholds = seq(0.05,0.95,0.05)){
+
+  resultados <- list()
+
+  for(th in thresholds){
+
+    tmp <- modelo$pred %>%
+
+      group_by(Resample) %>%
+
+      group_modify(~{
+
+        pred <- factor(
+          ifelse(.x$dart >= th,
+                 "dart",
+                 "arrow"),
+          levels=c("arrow","dart")
+        )
+
+        cm <- confusionMatrix(
+          pred,
+          factor(.x$obs,
+                 levels=c("arrow","dart")),
+          positive="dart"
+        )
+
+        tibble(
+
+          Sensitivity = unname(cm$byClass["Sensitivity"]),
+
+          Specificity = unname(cm$byClass["Specificity"]),
+
+          BalancedAccuracy =
+            unname(cm$byClass["Balanced Accuracy"])
+
+        )
+
+      }) %>%
+
+      mutate(
+
+        Threshold = th,
+
+        Model = nombre
+
+      )
+
+    resultados[[length(resultados)+1]] <- tmp
+
+  }
+
+  bind_rows(resultados)
+
+}
+```
+
+
+```{r}
+#047
+# Analyze classification thresholds
+thr1 <- threshold_curve(lda_cv1,"LW")
+
+thr2 <- threshold_curve(lda_cv2,"WT")
+
+thr3 <- threshold_curve(lda_cv3,"LWT")
+```
+
+
+```{r}
+#048
+# Run analysis step
+thresholds <- bind_rows(
+  thr1,
+  thr2,
+  thr3
+)
+```
+
+
+```{r}
+#049
+# 95%
+thr_summary <-
+
+thresholds %>%
+
+pivot_longer(
+
+cols=c(
+Sensitivity,
+Specificity,
+BalancedAccuracy),
+
+names_to="Metric",
+
+values_to="Value"
+
+) %>%
+
+group_by(
+
+Model,
+
+Metric,
+
+Threshold
+
+) %>%
+
+summarise(
+
+Mean=mean(Value),
+
+LI95=quantile(Value,.025),
+
+LS95=quantile(Value,.975),
+
+.groups="drop"
+
+)
+```
+
+
+
+
+```{r}
+#050
+# Visualize analysis results
+
+ggplot(thr_summary,
+       aes(x = Threshold,
+           y = Mean,
+           colour = Model)) +
+
+  geom_line(linewidth = 1.1) +
+
+  ## Thresholds discutidos por Buchanan
+  geom_vline(xintercept = c(0.15, 0.50),
+             linetype = "dashed",
+             colour = "grey40",
+             linewidth = 0.6) +
+
+  facet_wrap(~Metric,
+             ncol = 1) +
+
+  coord_cartesian(ylim = c(0.65, 1.00)) +
+
+  scale_x_continuous(
+    breaks = seq(0.1, 0.9, 0.1)
+  ) +
+
+  labs(
+    x = "Classification threshold",
+    y = "Mean performance",
+    colour = "Model"
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "white",
+                                    colour = "black"),
+    strip.text = element_text(face = "bold"),
+    axis.title = element_text(face = "bold")
+  )
+```
+
+
+```{r}
+#051
+# Build the classification table
+tabla <- data.frame(
+  ID   = rownames(test),
+  Real = test$type,
+  stringsAsFactors = FALSE
+)
+
+head(tabla)
+```
+
+
+```{r}
+#052
+# Classification threshold = 0.15
+tabla$LW015 <- ifelse(
+  pred1$posterior[, "dart"] >= 0.15,
+  "dart",
+  "arrow"
+)
+
+## Classification threshold = 0.50
+tabla$LW050 <- ifelse(
+  pred1$posterior[, "dart"] >= 0.50,
+  "dart",
+  "arrow"
+)
+
+## P (Dart)
+tabla$Prob_LW <- tabla$Prob_LW <- round(pred1$posterior[, "dart"], 4)
+
+## Missclasification rate
+tabla$LW015_OK <- ifelse(
+  tabla$LW015 == tabla$Real,
+  "✓",
+  "✗"
+)
+
+tabla$LW050_OK <- ifelse(
+  tabla$LW050 == tabla$Real,
+  "✓",
+  "✗"
+)
+```
+
+```{r}
+#053
+# Run analysis step
+tabla$LW_Cambio <- ifelse(tabla$LW015 != tabla$LW050,
+                          "Yes",
+                          "No")
+
+```
+
+
+
+```{r}
+#054
+# Run analysis step
+tabla$N_aciertos <-
+  rowSums(tabla[, c("LW015_OK",
+                    "LW050_OK")] == "✓")
+```
+
+
+
+
+
+```{r}
+#055
+# Run analysis step
+## MODEL 2 (Width + Thickness)
+##==========================
+
+## Threshold = 0.15
+tabla$WT015 <- ifelse(
+  pred2$posterior[, "dart"] >= 0.15,
+  "dart",
+  "arrow"
+)
+
+## Threshold = 0.50
+tabla$WT050 <- ifelse(
+  pred2$posterior[, "dart"] >= 0.50,
+  "dart",
+  "arrow"
+)
+
+## Posterior prob
+tabla$Prob_WT <- signif(
+  pred2$posterior[, "dart"],
+  3
+)
+
+## Correct / Incorrec
+tabla$WT015_OK <- ifelse(
+  tabla$WT015 == tabla$Real,
+  "✓",
+  "✗"
+)
+
+tabla$WT050_OK <- ifelse(
+  tabla$WT050 == tabla$Real,
+  "✓",
+  "✗"
+)
+
+## table
+tabla$WT_Cambio <- ifelse(
+  tabla$WT015 != tabla$WT050,
+  "Sí",
+  "No"
+)
+```
+
+
+```{r}
+#056
+# Run analysis step
+## MODEL 3 (Length + Width + Thickness)
+##==========================
+
+tabla$LWT015 <- ifelse(
+  pred3$posterior[, "dart"] >= 0.15,
+  "dart",
+  "arrow"
+)
+
+tabla$LWT050 <- ifelse(
+  pred3$posterior[, "dart"] >= 0.50,
+  "dart",
+  "arrow"
+)
+
+tabla$Prob_LWT <- signif(
+  pred3$posterior[, "dart"],
+  3
+)
+
+tabla$LWT015_OK <- ifelse(
+  tabla$LWT015 == tabla$Real,
+  "✓",
+  "✗"
+)
+
+tabla$LWT050_OK <- ifelse(
+  tabla$LWT050 == tabla$Real,
+  "✓",
+  "✗"
+)
+
+tabla$LWT_Cambio <- ifelse(
+  tabla$LWT015 != tabla$LWT050,
+  "Sí",
+  "No"
+)
+```
+
+
+
+```{r}
+#057
+#   summary
+
+tabla$N_aciertos <- rowSums(
+  tabla[, c(
+    "LW015_OK","LW050_OK",
+    "WT015_OK","WT050_OK",
+    "LWT015_OK","LWT050_OK"
+  )] == "✓"
+)
+
+tabla$N_errores <- 6 - tabla$N_aciertos
+```
+
+
+```{r}
+#058
+# Run analysis step
+tabla$Categoria <- cut(
+  tabla$N_errores,
+  breaks = c(-1, 0, 5, 6),
+  labels = c("Always correct",
+             "Parcial errors",
+             "Always incorrect")
+)
+```
+
+
+```{r}
+#059
+# Run analysis step
+medidas <- data.frame(
+  ID = rownames(master_LDA),
+  length = master_LDA$length,
+  width = master_LDA$width,
+  thickness = master_LDA$thickness
+)
+
+tabla_plot <- merge(tabla, medidas, by = "ID")
+```
+
+
+
+
+```{r}
+#060
+# Visualize analysis results
+
+
+ggplot(tabla_plot,
+       aes(x = length,
+           y = width,
+           color = Categoria)) +
+
+  geom_point(size = 3, alpha = 0.8) +
+
+  theme_classic(base_size = 14) +
+
+  labs(
+    x = "Length (mm)",
+    y = "Width (mm)",
+    color = ""
+  )
+```
+
+
+```{r}
+#061
+# Run analysis step
+tabla$length    <- test$length
+tabla$width     <- test$width
+tabla$thickness <- test$thickness
+```
+
+
+```{r}
+#062
+# Run analysis step
+tabla$Grupo <- cut(
+  tabla$N_errores,
+  breaks = c(-1, 0, 2, 6),
+  labels = c("0", "1–2", "3–6")
+)
+```
+
+
+```{r}
+#063
+# Visualize analysis results
+ggplot(tabla,
+       aes(x = length,
+           y = width,
+           colour = Categoria,
+           shape = Real)) +
+
+  geom_point(size = 3) +
+
+  geom_text(
+    data = subset(tabla, N_errores > 0),
+    aes(label = ID),
+    nudge_y = 0.4,
+    size = 3.5,
+    show.legend = FALSE
+  ) +
+
+  scale_shape_manual(values = c(16,17)) +
+
+  scale_colour_manual(
+    values = c(
+      "Always correct" = "grey60",
+      "Parcial errors" = "green",
+      "Always incorrect" = "red"
+    )
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  labs(
+    x = "Length (mm)",
+    y = "Width (mm)",
+    colour = "Classification",
+    shape = "Tipo"
+  )
+```
+
+```{r}
+#064
+# List misclassified specimens
+
+errores <- subset(tabla, N_errores > 0)
+
+errores
+```
+
+
+
+
+```{r}
+#065
+# Run analysis step
+errores <- errores[
+  order(-errores$N_errores),
+  c("ID",
+    "Real",
+    "length",
+    "width",
+    "thickness",
+    "N_errores",
+    "Prob_LW",
+    "Prob_WT",
+    "Prob_LWT",
+    "LW015",
+    "WT015",
+    "LWT015")
+]
+
+errores
+```
+
+
+```{r}
+#066
+# Calculate the Iriarte index
+
+tabla$Iriarte <- tabla$length / tabla$thickness
+```
+
+
+
+```{r}
+#067
+# Run analysis step
+dart <- subset(tabla, Real == "dart")
+
+dart$Misclassified <- ifelse(
+  dart$LW015 == "arrow",
+  1,0)
+
+table(dart$Misclassified)
+```
+
+
+```{r}
+#068
+# Fit logistic regression
+mod_log <- glm(
+  Misclassified ~ Iriarte,
+  family = binomial,
+  data = dart
+)
+
+summary(mod_log)
+```
+>mayor indice de iriarte disminuye el odds de missclass 
+
+
+```{r}
+#069
+# Run analysis step
+exp(coef(mod_log))
+```
+
+```{r}
+#070
+# Run analysis step
+exp(confint(mod_log))
+```
+
+```{r}
+#071
+# Run analysis step
+anova(mod_log,
+      test="Chisq")
+```
+
+
+
+```{r}
+#072
+# Run analysis step
+reduccion_error=(0.4149904-1)
+
+reduccion_error
+
+```
+
+
+
+```{r}
+#073
+# Visualize analysis results
+
+ggplot(dart,
+       aes(Iriarte,
+           Misclassified)) +
+
+  geom_jitter(
+    height = 0.05,
+    width = 0
+  ) +
+
+  stat_smooth(
+    method = "glm",
+    method.args = list(family = "binomial"),
+    se = TRUE
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  labs(
+    x = "Iriarte index",
+    y = "Probability of misclassification"
+  )
+```
+
+```{r}
+#074
+# Load required packages
+library(pscl)
+
+pR2(mod_log)
+```
+
+
+
+```{r}
+#075
+# Load required packages
+library(pROC)
+
+roc_obj <- roc(
+  dart$Misclassified,
+  fitted(mod_log)
+)
+
+auc(roc_obj)
+```
+
+
+
+
+```{r}
+#076
+# Generate model predictions
+predict(
+  mod_log,
+  newdata=data.frame(Iriarte=c(6,12)),
+  type="response"
+)
+```
+
+```{r}
+#077
+# Run analysis step
+range(dart$Iriarte)
+```
+
+```{r}
+#078
+# Visualize analysis results
+library(ggplot2)
+library(patchwork)
+
+## Predicciones
+newdat <- data.frame(
+  Iriarte = seq(min(dart$Iriarte),
+                max(dart$Iriarte),
+                length.out = 300)
+)
+
+pred <- predict(mod_log,
+                newdata = newdat,
+                type = "link",
+                se.fit = TRUE)
+
+newdat$fit <- plogis(pred$fit)
+newdat$lwr <- plogis(pred$fit - 1.96*pred$se.fit)
+newdat$upr <- plogis(pred$fit + 1.96*pred$se.fit)
+
+##==========================
+## Panel A
+##==========================
+
+p1 <-
+
+ggplot(newdat,
+       aes(Iriarte, fit))+
+
+geom_ribbon(aes(ymin=lwr,
+                ymax=upr),
+            fill="grey80",
+            alpha=.6)+
+
+geom_line(linewidth=1.3,
+          colour="#2166AC")+
+
+theme_classic(base_size=15)+
+
+coord_cartesian(ylim=c(0,1))+
+
+labs(x="",
+     y="Predicted probability\nof misclassification")
+
+##==========================
+## Panel B
+##==========================
+
+p2 <-
+
+ggplot(dart,
+       aes(Iriarte,
+           factor(Misclassified)))+
+
+geom_rug(aes(colour=factor(Misclassified)),
+         sides="b",
+         linewidth=2)+
+
+geom_point(aes(colour=factor(Misclassified)),
+           size=3,
+           alpha=.8,
+           position=position_jitter(height=.05))+
+
+geom_text(
+  data=subset(dart,Misclassified==1),
+  aes(label=ID),
+  nudge_y=.15,
+  show.legend=FALSE,
+  colour="red",
+  size=4
+)+
+
+scale_y_discrete(
+  labels=c("Correct","Misclassified")
+)+
+
+scale_colour_manual(
+  values=c("black","red"),
+  guide="none"
+)+
+
+theme_classic(base_size=15)+
+
+labs(x="Iriarte index (Length / Thickness)",
+     y="Observed")
+
+##==========================
+## Final plot
+##==========================
+
+p1/p2 +
+plot_annotation(tag_levels="A")
+```
+```{r}
+#079
+# Run analysis step
+## WT
+##=====================================
+
+dart <- subset(tabla, Real == "dart")
+
+dart$Misclassified <- ifelse(
+  dart$WT015 == "arrow",
+  1,0
+)
+
+table(dart$Misclassified)
+```
+
+
+
+
+
+```{r}
+#080
+# Fit logistic regression
+mod_log_WT <- glm(
+  Misclassified ~ Iriarte,
+  family = binomial,
+  data = dart
+)
+
+summary(mod_log_WT)
+```
+
+
+```{r}
+#081
+# Run analysis step
+exp(coef(mod_log_WT))
+
+exp(confint(mod_log_WT))
+```
+
+
+```{r}
+#082
+# Run analysis step
+anova(
+  mod_log_WT,
+  test="Chisq"
+)
+```
+
+
+
+
+
+```{r}
+#083
+# Run analysis step
+roc_obj_WT <- roc(
+  dart$Misclassified,
+  fitted(mod_log_WT)
+)
+
+auc(roc_obj_WT)
+```
+
+```{r}
+#084
+# Generate model predictions
+predict(
+  mod_log_WT,
+  newdata=data.frame(
+    Iriarte=c(6,12)
+  ),
+  type="response"
+)
+```
+
+
+```{r}
+#085
+# Generate model predictions
+newdat <- data.frame(
+  Iriarte=seq(
+    min(dart$Iriarte),
+    max(dart$Iriarte),
+    length.out=300
+  )
+)
+
+pred <- predict(
+  mod_log_WT,
+  newdata=newdat,
+  type="link",
+  se.fit=TRUE
+)
+
+newdat$fit <- plogis(pred$fit)
+newdat$lwr <- plogis(pred$fit-1.96*pred$se.fit)
+newdat$upr <- plogis(pred$fit+1.96*pred$se.fit)
+```
+
+
+
+```{r}
+#086
+# Visualize analysis results
+
+## Panel A
+##==========================
+
+p1 <-
+
+ggplot(newdat,
+       aes(Iriarte, fit))+
+
+geom_ribbon(aes(ymin=lwr,
+                ymax=upr),
+            fill="grey80",
+            alpha=.6)+
+
+geom_line(linewidth=1.3,
+          colour="#2166AC")+
+
+theme_classic(base_size=15)+
+
+coord_cartesian(ylim=c(0,1))+
+
+labs(x="",
+     y="Predicted probability\nof misclassification")
+
+##==========================
+## Panel B
+##==========================
+
+p2 <-
+
+ggplot(dart,
+       aes(Iriarte,
+           factor(Misclassified)))+
+
+geom_rug(aes(colour=factor(Misclassified)),
+         sides="b",
+         linewidth=2)+
+
+geom_point(aes(colour=factor(Misclassified)),
+           size=3,
+           alpha=.8,
+           position=position_jitter(height=.05))+
+
+geom_text(
+  data=subset(dart,Misclassified==1),
+  aes(label=ID),
+  nudge_y=.15,
+  show.legend=FALSE,
+  colour="red",
+  size=4
+)+
+
+scale_y_discrete(
+  labels=c("Correct","Misclassified")
+)+
+
+scale_colour_manual(
+  values=c("black","red"),
+  guide="none"
+)+
+
+theme_classic(base_size=15)+
+
+labs(x="Iriarte index (Length / Thickness)",
+     y="Observed")
+
+##==========================
+## Final plot
+##==========================
+
+p1/p2 +
+plot_annotation(tag_levels="A")
+```
+
+
+
+```{r}
+#088
+# Run analysis step
+## LWT
+##=====================================
+
+dart <- subset(tabla, Real == "dart")
+
+dart$Misclassified <- ifelse(
+  dart$LWT015 == "arrow",
+  1,0
+)
+
+table(dart$Misclassified)
+```
+
+```{r}
+#089
+# Logit model LWT
+mod_log_LWT <- glm(
+  Misclassified ~ Iriarte,
+  family = binomial,
+  data = dart
+)
+
+summary(mod_log_LWT)
+```
+
+
+```{r}
+#090
+# ODD ratios
+exp(coef(mod_log_LWT))
+
+exp(confint(mod_log_LWT))
+
+```
+
+
+```{r}
+#091
+# Run the likelihood-ratio test
+anova(
+  mod_log_LWT,
+  test = "Chisq"
+)
+```
+
+
+
+
+```{r}
+#092
+# Calculate pseudo-R-squared
+pR2(mod_log_LWT)
+```
+
+```{r}
+#093
+# Evaluate the ROC curve
+roc_obj_LWT <- roc(
+  dart$Misclassified,
+  fitted(mod_log_LWT)
+)
+
+auc(roc_obj_LWT)
+```
+
+
+
+```{r}
+#094
+# Generate predicted probabilities
+predict(
+  mod_log_LWT,
+  newdata = data.frame(Iriarte = c(6,12)),
+  type = "response"
+)
+```
+
+
+```{r}
+#095
+# Prepare regression plot data
+
+
+newdat <- data.frame(
+  Iriarte = seq(min(dart$Iriarte),
+                max(dart$Iriarte),
+                length.out = 300)
+)
+
+pred <- predict(
+  mod_log_LWT,
+  newdata = newdat,
+  type = "link",
+  se.fit = TRUE
+)
+
+newdat$fit <- plogis(pred$fit)
+newdat$lwr <- plogis(pred$fit - 1.96 * pred$se.fit)
+newdat$upr <- plogis(pred$fit + 1.96 * pred$se.fit)
+```
+
+
+
+```{r}
+#096
+# Visualize analysis results
+
+## Panel A
+##==========================
+
+p1 <-
+
+ggplot(newdat,
+       aes(Iriarte, fit))+
+
+geom_ribbon(aes(ymin=lwr,
+                ymax=upr),
+            fill="grey80",
+            alpha=.6)+
+
+geom_line(linewidth=1.3,
+          colour="#2166AC")+
+
+theme_classic(base_size=15)+
+
+coord_cartesian(ylim=c(0,1))+
+
+labs(x="",
+     y="Predicted probability\nof misclassification")
+
+##==========================
+## Panel B
+##==========================
+
+p2 <-
+
+ggplot(dart,
+       aes(Iriarte,
+           factor(Misclassified)))+
+
+geom_rug(aes(colour=factor(Misclassified)),
+         sides="b",
+         linewidth=2)+
+
+geom_point(aes(colour=factor(Misclassified)),
+           size=3,
+           alpha=.8,
+           position=position_jitter(height=.05))+
+
+geom_text(
+  data = subset(dart, Misclassified == "Misclassified"),
+  aes(label=ID),
+  nudge_y=.15,
+  show.legend=FALSE,
+  colour="red",
+  size=4
+)+
+
+scale_y_discrete(
+  labels=c("Correct","Misclassified")
+)+
+
+scale_colour_manual(
+  values=c("black","red"),
+  guide="none"
+)+
+
+theme_classic(base_size=15)+
+
+labs(x="Iriarte index (Length / Thickness)",
+     y="Observed")
+
+##==========================
+## Final plot
+##==========================
+
+p1/p2 +
+plot_annotation(tag_levels="A")
+```
+
+
+```{r}
+#097
+# Record R session information
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

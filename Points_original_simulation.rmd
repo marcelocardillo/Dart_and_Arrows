@@ -1,0 +1,615 @@
+---
+title: "Points_original"
+output:
+  word_document: default
+  html_document: default
+date: "2026-01-16"
+---
+Reduction Effects upon Dart and Arrow Classification: 
+A New Model Using an Expanded Dataset
+
+Michael J. Shott, Marcelo Cardillo and Judith Charlin 
+
+              Supplementary data
+
+> NOTE:
+# The counterfactual simulation was designed to isolate the effect of
+# Length reduction on classification while preserving realistic empirical
+# combinations of the remaining morphometric variables. Observed dart
+# points were resampled with replacement, Length was replaced by values
+# within the lower end of the empirical dart-length distribution, and
+# all simulated cases were classified using the LDA fitted to the
+# original training set. The simulation is therefore not an independent
+# sample and should be interpreted as a counterfactual sensitivity
+# analysis of the classifier rather than as a new validation dataset.
+#
+# The results provide complementary categorical and continuous measures:
+# the proportion of simulated darts misclassified as arrows at P(dart) =
+# 0.5, and the change in posterior dart probability across the simulated
+# Length range. Together, these quantify how reduction in Length can
+# progressively shift morphologically dart-like specimens toward the
+# arrow classification.
+#
+
+
+```{r}
+# Purpose: Load required packages.
+## Packages
+
+library(dplyr)     # manipulación de datos
+library(MASS)      # LDA (lda)
+library(caret)     # partición de datos, métricas, confusionMatrix
+library(pROC)      # ROC y AUC
+library(ggplot2)   # gráficos (cuando los usamos)
+library(haven)
+```
+
+
+
+```{r}
+#001
+# Load data
+Points_core <- read.csv("Points_core.csv")
+
+# Check data
+str(Points_core)
+summary(Points_core)
+table(Points_core$class)
+```
+```{r}
+# 001
+# Purpose: Compute class-specific length summaries.
+# Plot length versus width for the full sample to inspect overlap.
+
+# Descriptive statistics
+stats_length <- Points_core %>%
+  group_by(class) %>%
+  summarise(
+    q1  = quantile(length, 0.25),
+    med = median(length),
+    q3  = quantile(length, 0.75)
+  )
+
+# Plot
+ggplot(
+  Points_core,
+  aes(
+    x = length,
+    y = width,
+    shape = class,
+    color = class
+  )
+) +
+  
+  geom_point(size = 3, alpha = 0.8) +
+  
+  ## Arrows (red): Q1, median, and Q3
+  geom_vline(
+    data = stats_length %>% filter(class == "arrow"),
+    aes(xintercept = q1),
+    color = "red",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  geom_vline(
+    data = stats_length %>% filter(class == "arrow"),
+    aes(xintercept = med),
+    color = "red",
+    linetype = "dashed",
+    linewidth = 1.2
+  ) +
+  geom_vline(
+    data = stats_length %>% filter(class == "arrow"),
+    aes(xintercept = q3),
+    color = "red",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  
+  ## Darts (blue): Q1, median, and Q3
+  geom_vline(
+    data = stats_length %>% filter(class == "dart"),
+    aes(xintercept = q1),
+    color = "blue",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  geom_vline(
+    data = stats_length %>% filter(class == "dart"),
+    aes(xintercept = med),
+    color = "blue",
+    linetype = "dashed",
+    linewidth = 1.2
+  ) +
+  geom_vline(
+    data = stats_length %>% filter(class == "dart"),
+    aes(xintercept = q3),
+    color = "blue",
+    linetype = "dotted",
+    linewidth = 1
+  ) +
+  
+  scale_shape_manual(
+    values = c(
+      arrow = 17,
+      dart  = 16
+    )
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      arrow = "red",
+      dart  = "blue"
+    )
+  ) +
+  
+  labs(
+    x = "Length",
+    y = "Width",
+    shape = "Class",
+    color = "Class",
+    title = "Dispersion Length vs Width",
+    subtitle = "Median and quartiles by class"
+  ) +
+  
+  theme_minimal(base_size = 13)
+```
+Note:This plot shows the distribution of Length and Width for the complete sample, with arrows and darts distinguished by color and symbol. Vertical lines indicate the first quartile (Q1), median, and third quartile (Q3) of Length for each class. The plot is used to visualize the degree of morphological overlap between classes and to characterize the empirical distribution of dart-point length prior to the counterfactual reduction simulation.
+
+The lower quartile of dart-point Length was subsequently used to define the upper limit of the length range in the counterfactual reduction simulation.
+
+```{r}
+#003
+# Purpose: Create reproducible four-predictor training and test sets.
+# Repeat the procedure, including length
+##  Stratified 80/20 split
+set.seed(2026)
+
+idx_train <- sample(
+  seq_len(nrow(Points_core)),
+  size = 0.80 * nrow(Points_core)
+)
+
+train <- Points_core[idx_train, ]
+test  <- Points_core[-idx_train, ]
+
+
+```
+
+
+```{r}
+# 004
+# Purpose: Standardize the four predictors using training-set parameters.
+# The same parameters are then applied to the test set.
+
+vars <- c("length", "width", "thick", "neckwid")
+
+X_train <- train[, vars]
+X_test  <- test[, vars]
+
+X_train_scaled <- scale(X_train)
+
+mu_train <- attr(X_train_scaled, "scaled:center")
+sd_train <- attr(X_train_scaled, "scaled:scale")
+
+X_test_scaled <- scale(
+  X_test,
+  center = mu_train,
+  scale = sd_train
+)
+```
+
+
+
+```{r}
+# 005
+# Purpose: Fit the four-predictor LDA using the training set only.
+
+y_train <- train$class
+
+lda_fit <- MASS::lda(
+  x = X_train_scaled,
+  grouping = y_train
+)
+
+print(lda_fit)
+```
+
+
+```{r}
+# 006
+# Purpose: Classify the original test set using the LDA fitted on the training set.
+
+pred_test <- predict(
+  lda_fit,
+  newdata = X_test_scaled
+)
+
+test_results <- data.frame(
+  observed = test$class,
+  predicted = pred_test$class,
+  P_dart = pred_test$posterior[, "dart"]
+)
+
+head(test_results)
+```
+
+
+```{r}
+# 007
+# Purpose: Evaluate classification performance on the original test set.
+#Confusion matrix
+
+confusion_matrix <- table(
+  Observed = test_results$observed,
+  Predicted = test_results$predicted
+)
+##Accurancy
+accuracy <- mean(
+  test_results$observed == test_results$predicted
+)
+
+print(accuracy)
+print(confusion_matrix)
+```
+
+```{r}
+# 008
+# Purpose: Describe classifier performance across a continuous range
+# of posterior-probability thresholds.
+
+thresholds <- seq(0, 1, by = 0.01)
+
+threshold_results <- data.frame(
+  threshold = thresholds,
+  sensitivity = NA,
+  specificity = NA,
+  balanced_accuracy = NA
+)
+
+for (i in seq_along(thresholds)) {
+  
+  thr <- thresholds[i]
+  
+  pred_thr <- ifelse(
+    test_results$P_dart >= thr,
+    "dart",
+    "arrow"
+  )
+  
+  TP <- sum(test_results$observed == "dart" &
+              pred_thr == "dart")
+  
+  FN <- sum(test_results$observed == "dart" &
+              pred_thr == "arrow")
+  
+  TN <- sum(test_results$observed == "arrow" &
+              pred_thr == "arrow")
+  
+  FP <- sum(test_results$observed == "arrow" &
+              pred_thr == "dart")
+  
+  sensitivity <- TP / (TP + FN)
+  specificity <- TN / (TN + FP)
+  
+  threshold_results$sensitivity[i] <- sensitivity
+  threshold_results$specificity[i] <- specificity
+  threshold_results$balanced_accuracy[i] <-
+    (sensitivity + specificity) / 2
+}
+
+head(threshold_results)
+```
+# NOTE:This analysis does not seek to identify an optimal classification
+threshold.
+Instead, it describes how sensitivity, specificity, and balanced accuracy
+change across the full range of P(dart) thresholds. The resulting plot is
+intended as supplementary material to illustrate classifier behavior.
+
+
+
+```{r}
+#009
+##Plot thresholds 
+
+ggplot(threshold_results,
+       aes(x = threshold)) +
+  
+  geom_line(aes(y = sensitivity,
+                color = "Sensitivity"),
+            linewidth = 1) +
+  
+  geom_line(aes(y = specificity,
+                color = "Specificity"),
+            linewidth = 1) +
+  
+  geom_line(aes(y = balanced_accuracy,
+                color = "Balanced accuracy"),
+            linewidth = 1) +
+  
+  scale_color_manual(
+    values = c(
+      "Sensitivity" = "#D55E00",
+      "Specificity" = "#0072B2",
+      "Balanced accuracy" = "#009E73"
+    ),
+    name = NULL
+  ) +
+  
+  labs(
+    x = "P(dart) threshold",
+    y = "Proportion"
+  ) +
+  
+  theme_classic(base_size = 12)
+
+```
+#Note: Classification performance across posterior-probability thresholds. 
+Sensitivity, specificity, and balanced accuracy are shown across the full range
+of P(dart) thresholds using the independent test set.
+
+```{r}
+# 010
+# Purpose: Define the empirical dart sample used as the basis
+# for the counterfactual reduction simulation.
+
+darts_core <- Points_core[Points_core$class == "dart", ]
+
+nrow(darts_core)
+
+```
+
+```{r}
+# 011
+# Purpose: Define the lower-quartile length range of empirical darts
+# for the counterfactual reduction simulation.
+
+dart_length_q1 <- stats_length %>%
+  filter(class == "dart") %>%
+  pull(q1)
+
+dart_length_min <- min(
+  Points_core$length[Points_core$class == "dart"],
+  na.rm = TRUE
+)
+
+print(dart_length_q1)
+print(dart_length_min)
+```
+# NOTE: The lower and upper limits of the simulation range are defined by the minimum observed dart length and the first quartile (Q1) of dart length, respectively. This range represents the lower end of the empirical dart-length distribution and is used to simulate counterfactual reduction in length.
+
+```{r}
+# 012
+# Purpose: Generate counterfactual dart points by resampling empirical
+# darts with replacement and modifying only Length.
+
+set.seed(123)
+
+n_synth <- 5000
+
+idx_base <- sample(
+  seq_len(nrow(darts_core)),
+  size = n_synth,
+  replace = TRUE
+)
+
+darts_synth <- darts_core[idx_base, ]
+
+darts_synth$length <- runif(
+  n = n_synth,
+  min = dart_length_min,
+  max = dart_length_q1
+)
+
+darts_synth2 <- darts_synth[
+  ,
+  c("length", "width", "thick", "neckwid")
+]
+
+head(darts_synth2)
+```
+# NOTE: The 5,000 simulated cases are generated by resampling observed dart  points with replacement. Width, thickness, and neck width are retained from the resampled specimens, while Length is replaced by a random  value within the lower.
+>These are counterfactual replicates, not independent observations.
+
+```{r}
+# 013
+# Purpose: Standardize the simulated predictors using training-set
+# parameters and classify the counterfactual cases with the "frozen LDA".
+
+X_synth <- darts_synth2[
+  ,
+  c("length", "width", "thick", "neckwid")
+]
+
+X_synth_scaled <- scale(
+  X_synth,
+  center = mu_train,
+  scale = sd_train
+)
+
+pred_synth <- predict(
+  lda_fit,
+  newdata = X_synth_scaled
+)
+
+P_dart_synth <- pred_synth$posterior[, "dart"]
+
+res_synth <- data.frame(
+  length = darts_synth2$length,
+  P_dart = P_dart_synth
+)
+
+head(res_synth)
+```
+# NOTE:The simulated predictors are standardized using the means and standard deviations estimated from the training set. The counterfactual cases are then classified using the LDA fitted to the original training data. The model is not refitted during the simulation.
+
+```{r}
+# 014
+# Purpose: Visualize counterfactual dart classification as a function
+# of reduced Length.
+
+thr <- 0.5
+
+# Predicted class according to the 0.5 threshold
+res_synth$class_pred <- ifelse(
+  res_synth$P_dart >= thr,
+  "dart",
+  "arrow"
+)
+
+# Colors
+cols <- ifelse(
+  res_synth$class_pred == "dart",
+  "red",
+  "blue"
+)
+
+# LOESS curve
+loess_fit <- loess(
+  P_dart ~ length,
+  data = res_synth
+)
+
+x_seq <- seq(
+  min(res_synth$length),
+  max(res_synth$length),
+  length.out = 200
+)
+
+y_lo <- predict(
+  loess_fit,
+  newdata = data.frame(length = x_seq)
+)
+
+# Plot
+plot(
+  res_synth$length,
+  res_synth$P_dart,
+  pch = 19,
+  col = cols,
+  xlab = "Length (mm)",
+  ylab = "P(dart)")
+
+# Horizontal line at the 0.5 threshold
+abline(
+  h = thr,
+  lty = 2,
+  lwd = 2
+)
+
+# Vertical line at Q1
+abline(
+  v = dart_length_q1,
+  lty = 3,
+  lwd = 2,
+  col = "gray40"
+)
+
+# LOESS line
+lines(
+  x_seq,
+  y_lo,
+  col = "black",
+  lwd = 3
+)
+```
+```{r}
+# 015
+# Purpose: Estimate the misclassification rate of counterfactual darts
+# across intervals of reduced Length.
+
+# Define length intervals
+breaks <- seq(
+  floor(min(res_synth$length)),
+  ceiling(max(res_synth$length)),
+  by = 2
+)
+
+res_synth$length_bin <- cut(
+  res_synth$length,
+  breaks = breaks,
+  include.lowest = TRUE
+)
+
+# Calculate misclassification rate within each interval
+error_by_length <- aggregate(
+  res_synth$class_pred == "arrow",
+  by = list(length_bin = res_synth$length_bin),
+  FUN = mean
+)
+
+names(error_by_length)[2] <- "error_rate"
+
+print(error_by_length)
+```
+```{r}
+# 016
+# Purpose: Summarize the classification of counterfactual dart points
+# using the 0.5 posterior-probability threshold.
+
+
+
+confusion_synth <- table(
+  Observed = rep("dart", nrow(res_synth)),
+  Predicted = res_synth$class_pred
+)
+
+
+
+print(confusion_synth)
+# error rate
+
+error_rate_synth <- mean(
+  res_synth$class_pred == "arrow"
+)
+
+print(error_rate_synth)
+```
+# NOTE: All 5,000 simulated cases represent counterfactual dart points.
+Using a P(dart) threshold of 0.5, 2,492 cases (49.84%) were classified as arrows and 2,508 (50.16%) as darts. The resulting  49.84% error rate represents the proportion of counterfactual darts misclassified after reducing Length, rather than the overall error  rate of the LDA. This result summarizes the effect of the simulated reduction across the entire lower-quartile Length range.
+
+
+```{r}
+# 017
+# Purpose: Quantify the change in LOESS-predicted P(dart)
+# across the counterfactual Length range.
+
+x_compare <- c(
+  min(loess_fit$x),
+  max(loess_fit$x)
+)
+
+y_compare <- predict(
+  loess_fit,
+  newdata = data.frame(length = x_compare)
+)
+
+loess_change <- data.frame(
+  length = x_compare,
+  P_dart_loess = y_compare
+)
+
+print(loess_change)
+
+delta_P_dart <- diff(y_compare)
+
+print(delta_P_dart)
+
+loess_slope <- delta_P_dart /
+  diff(x_compare)
+
+print(loess_slope)
+
+```
+
+# NOTE: Across the counterfactual Length range (21.8–39.7 mm), the LOESS predicts an increase in P(dart) from 0.377 to 0.618, corresponding to a total change of 0.241 probability units. The average change is approximately 0.0134 P(dart) units per mm of Length. This summarizes the gradual effect of Length reduction on the classifier within the lower end of the empirical dart-length distribution.
+
+
+
+```{r}
+# 018
+# Purpose: Save complete session information for reproducibility.
+
+sessionInfo()
+```
+
