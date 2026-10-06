@@ -30,11 +30,15 @@ La carpeta contiene también una aplicación **Shiny** que permite aplicar los m
 
 ```text
 Dart_and_Arrows/
-├── README.md
-├── app.R
+├── APP/
+├── R_code/
+│   ├── Master_LDA_Analysis_V.01.Rmd
+│   └── Points_original_simulation.rmd
 ├── lda_LW.rds
+├── lda_WT.rds
 ├── lda_LWT.rds
-└── lda_WT.rds
+├── README.md
+└── .zenodo.json
 ```
 
 Los scripts de preparación de datos, ajuste y evaluación de modelos, análisis de umbrales, análisis de reducción y simulaciones se incorporarán progresivamente a esta carpeta.
@@ -79,11 +83,15 @@ The folder also contains a **Shiny** application for applying the LDA models dev
 
 ```text
 Dart_and_Arrows/
-├── README.md
-├── app.R
+├── APP/
+├── R_code/
+│   ├── Master_LDA_Analysis_V.01.Rmd
+│   └── Points_original_simulation.rmd
 ├── lda_LW.rds
+├── lda_WT.rds
 ├── lda_LWT.rds
-└── lda_WT.rds
+├── README.md
+└── .zenodo.json
 ```
 
 Scripts for data preparation, model fitting and evaluation, threshold analysis, reduction analyses, and simulations will be progressively added to this folder.
