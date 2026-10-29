@@ -34,6 +34,7 @@ Dart_and_Arrows/
 ├── R_code/
 │   ├── Master_LDA_Analysis_V.01.Rmd
 │   └── Points_original_simulation.rmd
+├── LDA_master.txt (raw data)
 ├── lda_LW.rds
 ├── lda_WT.rds
 ├── lda_LWT.rds
